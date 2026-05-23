@@ -1,0 +1,409 @@
+import SwiftUI
+
+struct HomeView: View {
+    @Environment(ThemeStore.self) private var theme
+    @Environment(BookStore.self) private var bookStore
+    @Environment(SettingsStore.self) private var settings
+    @Environment(\.colorScheme) private var systemScheme
+
+    @State private var searchText = ""
+    @State private var suggestions: [OpenLibraryBook] = []
+    @State private var isSearchingSuggestions = false
+    @State private var showSuggestions = false
+    @State private var selectedCoverURL: URL?
+    @State private var debounceTask: Task<Void, Never>?
+    @State private var trending: [TrendingBook] = TrendingBooks.random()
+    @State private var placeholderIndex: Int = 0
+
+    private let placeholders = [
+        "Search by title or author…",
+        "Try 'Atomic Habits' by James Clear",
+        "Try 'Think and Grow Rich' by Napoleon Hill",
+        "Try 'The 7 Habits of Highly Effective People'",
+        "Try author: Malcolm Gladwell",
+        "Try 'The 4-Hour Workweek' by Tim Ferriss",
+        "Try 'Rich Dad Poor Dad' by Robert Kiyosaki",
+        "Try author: Brené Brown"
+    ]
+
+    private var isDark: Bool {
+        switch theme.mode {
+        case .dark: true
+        case .light: false
+        case .system: systemScheme == .dark
+        }
+    }
+
+    var body: some View {
+        @Bindable var bookStore = bookStore
+        ZStack {
+            AppColor.background(dark: isDark).ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: 24) {
+                    header
+                    searchCard
+                    if bookStore.isLoading {
+                        loadingCard
+                    } else if let err = bookStore.errorMessage {
+                        errorCard(err)
+                    } else {
+                        trendingSection
+                    }
+                }
+                .padding(20)
+            }
+            .refreshable {
+                trending = TrendingBooks.random()
+            }
+        }
+        .navigationBarHidden(true)
+        .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
+            placeholderIndex = (placeholderIndex + 1) % placeholders.count
+        }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Spacer()
+                Button {
+                    bookStore.path.append(.settings)
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .padding(12)
+                        .background(AppColor.cardBackground(dark: isDark), in: Circle())
+                        .foregroundStyle(AppColor.textMuted(dark: isDark))
+                }
+                Button {
+                    theme.toggle()
+                } label: {
+                    Image(systemName: isDark ? "sun.max.fill" : "moon.fill")
+                        .padding(12)
+                        .background(AppColor.cardBackground(dark: isDark), in: Circle())
+                        .foregroundStyle(isDark ? .yellow : AppColor.primary)
+                }
+            }
+
+            ZStack {
+                Circle().fill(AppColor.primary.opacity(0.18)).frame(width: 80, height: 80)
+                Image(systemName: "book.fill")
+                    .font(.system(size: 38))
+                    .foregroundStyle(AppColor.primary)
+            }
+
+            HStack(spacing: 0) {
+                Text("Book").foregroundStyle(AppColor.text(dark: isDark))
+                Text("2").foregroundStyle(AppColor.primary)
+                Text("Action").foregroundStyle(AppColor.text(dark: isDark))
+            }
+            .font(.system(size: 34, weight: .bold))
+
+            Text("Transform Books into Actionable Insights")
+                .font(.subheadline)
+                .foregroundStyle(AppColor.textMuted(dark: isDark))
+
+            HStack(spacing: 16) {
+                featureBadge(icon: "magnifyingglass", label: "Search Books")
+                featureBadge(icon: "book.fill", label: "Get Summary")
+                featureBadge(icon: "lightbulb.fill", label: "Actionable Steps")
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private func featureBadge(icon: String, label: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.caption2)
+            Text(label).font(.caption2)
+        }
+        .foregroundStyle(AppColor.textMuted(dark: isDark))
+    }
+
+    // MARK: - Search Card
+
+    private var searchCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(AppColor.textMuted(dark: isDark))
+                TextField(placeholders[placeholderIndex], text: $searchText)
+                    .submitLabel(.search)
+                    .onChange(of: searchText) { _, newValue in
+                        handleTextChange(newValue)
+                    }
+                    .onSubmit { Task { await runSearch() } }
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.words)
+
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                        suggestions = []
+                        showSuggestions = false
+                        selectedCoverURL = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(AppColor.textMuted(dark: isDark))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isDark ? Color(red: 0.12, green: 0.16, blue: 0.22) : Color.white)
+            )
+
+            if showSuggestions {
+                suggestionsList
+            }
+
+            Button {
+                Task { await runSearch() }
+            } label: {
+                HStack {
+                    if bookStore.isLoading {
+                        ProgressView().tint(.white)
+                        Text("Analyzing…").bold()
+                    } else {
+                        Text("Get Insights").bold()
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(
+                    searchText.trimmingCharacters(in: .whitespaces).isEmpty || bookStore.isLoading
+                    ? AppColor.primary.opacity(0.5)
+                    : AppColor.primary
+                )
+                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .disabled(searchText.trimmingCharacters(in: .whitespaces).isEmpty || bookStore.isLoading)
+
+            if !bookStore.isLoading {
+                Text("Try any book title — AI will analyze it and create actionable steps!")
+                    .font(.caption)
+                    .foregroundStyle(AppColor.textMuted(dark: isDark))
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(AppColor.cardBackground(dark: isDark))
+                .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 4)
+        )
+    }
+
+    @ViewBuilder
+    private var suggestionsList: some View {
+        VStack(spacing: 0) {
+            if isSearchingSuggestions && suggestions.isEmpty {
+                HStack {
+                    ProgressView()
+                    Text("Searching…")
+                        .font(.caption)
+                        .foregroundStyle(AppColor.textMuted(dark: isDark))
+                }
+                .padding(12)
+            } else if !isSearchingSuggestions && suggestions.isEmpty && !searchText.isEmpty {
+                Text("No books found. Tap Get Insights to search with AI.")
+                    .font(.caption)
+                    .foregroundStyle(AppColor.textMuted(dark: isDark))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            } else {
+                ForEach(suggestions) { book in
+                    Button {
+                        selectSuggestion(book)
+                    } label: {
+                        HStack(spacing: 10) {
+                            AsyncImage(url: book.coverImageUrl) { phase in
+                                switch phase {
+                                case .success(let img): img.resizable().scaledToFill()
+                                default:
+                                    ZStack {
+                                        AppColor.primary
+                                        Image(systemName: "book.fill")
+                                            .foregroundStyle(.white)
+                                    }
+                                }
+                            }
+                            .frame(width: 36, height: 50)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(book.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                                Text(book.author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                    }
+                    .buttonStyle(.plain)
+                    Divider()
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.secondary.opacity(0.2))
+        )
+    }
+
+    // MARK: - Loading / Error
+
+    private var loadingCard: some View {
+        @Bindable var bookStore = bookStore
+        return VStack(spacing: 12) {
+            ProgressView().scaleEffect(1.4).tint(AppColor.primary)
+            Text("Our AI is reading through \"\(bookStore.searchTitle)\" to create a custom 7-day action plan…")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(AppColor.primaryLight)
+                .padding(.horizontal)
+        }
+        .padding(.vertical, 24)
+    }
+
+    private func errorCard(_ message: String) -> some View {
+        @Bindable var bookStore = bookStore
+        return VStack(spacing: 12) {
+            Text("Oops! Something went wrong")
+                .font(.headline)
+                .foregroundStyle(AppColor.error)
+            Text(message)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(AppColor.textMuted(dark: isDark))
+            Button("Try Again") {
+                bookStore.errorMessage = nil
+                searchText = ""
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(AppColor.primary)
+            .foregroundStyle(.white)
+            .clipShape(Capsule())
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(AppColor.error.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    // MARK: - Trending
+
+    private var trendingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Try one of these")
+                    .font(.headline)
+                    .foregroundStyle(AppColor.text(dark: isDark))
+                Spacer()
+                Button {
+                    trending = TrendingBooks.random()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundStyle(AppColor.textMuted(dark: isDark))
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(trending) { b in
+                        Button {
+                            searchText = b.title
+                            selectedCoverURL = URL(string: b.coverImageUrl)
+                            Task { await runSearch() }
+                        } label: {
+                            VStack(spacing: 6) {
+                                BookCoverImage(isbn: b.isbn, title: b.title, width: 100, height: 150)
+                                Text(b.title)
+                                    .font(.caption.weight(.medium))
+                                    .lineLimit(2)
+                                    .foregroundStyle(AppColor.text(dark: isDark))
+                                Text(b.author)
+                                    .font(.caption2)
+                                    .foregroundStyle(AppColor.textMuted(dark: isDark))
+                                    .lineLimit(1)
+                            }
+                            .frame(width: 110)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func handleTextChange(_ newValue: String) {
+        selectedCoverURL = nil
+        debounceTask?.cancel()
+        let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            suggestions = []
+            showSuggestions = false
+            isSearchingSuggestions = false
+            return
+        }
+        showSuggestions = true
+        isSearchingSuggestions = true
+        debounceTask = Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if Task.isCancelled { return }
+            let results = await OpenLibraryService.search(query: trimmed)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                self.suggestions = results
+                self.isSearchingSuggestions = false
+            }
+        }
+    }
+
+    private func selectSuggestion(_ b: OpenLibraryBook) {
+        searchText = b.title
+        selectedCoverURL = b.coverImageUrl
+        suggestions = []
+        showSuggestions = false
+    }
+
+    private func runSearch() async {
+        @Bindable var bookStore = bookStore
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !bookStore.isLoading else { return }
+
+        showSuggestions = false
+        bookStore.searchTitle = trimmed
+        bookStore.isLoading = true
+        bookStore.errorMessage = nil
+
+        let result = await OpenAIService.searchBook(trimmed, apiKey: settings.apiKey)
+
+        await MainActor.run {
+            bookStore.isLoading = false
+            if result.success, var book = result.book {
+                if let selected = selectedCoverURL {
+                    book.coverImageUrl = selected.absoluteString
+                }
+                bookStore.currentBook = book
+                bookStore.path.append(.bookResult)
+            } else {
+                bookStore.errorMessage = result.error ?? "Failed to find book"
+            }
+        }
+    }
+}
+
+#Preview {
+    NavigationStack {
+        HomeView()
+            .environment(ThemeStore())
+            .environment(BookStore())
+            .environment(SettingsStore())
+    }
+}

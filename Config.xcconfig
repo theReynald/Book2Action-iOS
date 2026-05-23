@@ -1,0 +1,13 @@
+// Book2Action build configuration
+//
+// To inject your OpenAI API key at build time (so it doesn't need to be entered
+// in-app on every install), set OPENAI_API_KEY below. Otherwise, the user can
+// enter their key in the Settings screen and it will be stored in the Keychain.
+//
+// IMPORTANT: This file may contain secrets. It is gitignored via .gitignore.
+//
+// OPENAI_API_KEY = 
+// '//' inside an xcconfig value must be escaped as '/$()/' — but since this is a
+// straight token replacement we just expose the variable verbatim.
+GCC_PREPROCESSOR_DEFINITIONS = $(inherited)
+INFOPLIST_KEY_OpenAIAPIKey = $(OPENAI_API_KEY)
