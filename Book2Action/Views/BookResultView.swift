@@ -80,7 +80,7 @@ struct BookResultView: View {
             BookCoverImage(
                 isbn: book.isbn,
                 title: book.title,
-                explicitURL: URL(string: book.coverImageUrl),
+                explicitURL: book.coverImageUrl.flatMap(URL.init(string:)),
                 width: 110,
                 height: 165
             )

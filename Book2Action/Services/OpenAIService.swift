@@ -73,8 +73,9 @@ enum OpenAIService {
     }
 
     static func searchBook(_ rawTitle: String, apiKey: String) async -> BookSearchResult {
-        let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = title.lowercased()
+        let raw = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let (title, author) = splitTitleAndAuthor(raw)
+        let normalized = raw.lowercased()
 
         if !ContentFilter.isAppropriate(normalized) {
             return .init(success: false,
@@ -90,7 +91,7 @@ enum OpenAIService {
         }
 
         do {
-            let book = try await generateBookAnalysis(for: title, apiKey: apiKey)
+            let book = try await generateBookAnalysis(for: title, author: author, apiKey: apiKey)
             return .init(success: true, book: book)
         } catch ServiceError.notFound {
             return .init(
@@ -104,9 +105,32 @@ enum OpenAIService {
 
     // MARK: - Private
 
-    private static func generateBookAnalysis(for title: String, apiKey: String) async throws -> Book {
+    /// Splits a query like `"The Intruder by Miriam MacGregor"` into
+    /// `(title: "The Intruder", author: "Miriam MacGregor")`. If no `" by "`
+    /// separator is found, returns the whole string as the title and a nil author.
+    private static func splitTitleAndAuthor(_ raw: String) -> (title: String, author: String?) {
+        let separator = " by "
+        guard let range = raw.range(of: separator, options: [.caseInsensitive, .backwards]) else {
+            return (raw, nil)
+        }
+        let title = raw[..<range.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        let author = raw[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.isEmpty || author.isEmpty {
+            return (raw, nil)
+        }
+        return (title, author)
+    }
+
+    private static func generateBookAnalysis(for title: String, author: String?, apiKey: String) async throws -> Book {
+        let authorHint: String
+        if let author, !author.isEmpty {
+            authorHint = "\n\nThe author is \"\(author)\". This author hint is authoritative — use it to disambiguate when multiple books share the title, and return THIS author's edition."
+        } else {
+            authorHint = ""
+        }
+
         let userPrompt = """
-        Analyze the book "\(title)" and provide a comprehensive response in the following JSON format:
+        Analyze the book "\(title)"\(authorHint) and provide a comprehensive response in the following JSON format:
 
         {
           "title": "Exact book title",
