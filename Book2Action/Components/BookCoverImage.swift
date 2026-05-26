@@ -5,13 +5,17 @@ import SwiftUI
 struct BookCoverImage: View {
     let isbn: String?
     let title: String
+    var explicitURL: URL? = nil
     var width: CGFloat = 120
     var height: CGFloat = 180
 
-    @State private var stage: Int = 0  // 0 = primary, 1 = google, 2 = title, 3 = placeholder
+    @State private var stage: Int = 0  // 0 = explicit/primary, then fallbacks, then placeholder
 
     private var candidates: [URL] {
-        CoverImage.fallbackURLs(isbn: isbn, title: title)
+        var urls: [URL] = []
+        if let explicitURL { urls.append(explicitURL) }
+        urls.append(contentsOf: CoverImage.fallbackURLs(isbn: isbn, title: title))
+        return urls
     }
 
     var body: some View {

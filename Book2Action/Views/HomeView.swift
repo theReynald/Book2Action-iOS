@@ -371,7 +371,10 @@ struct HomeView: View {
     }
 
     private func selectSuggestion(_ b: OpenLibraryBook) {
-        searchText = b.title
+        // Include the author so OpenAI returns the exact edition the user picked
+        // (otherwise a title like "The Intruder" matches many different books).
+        let author = b.author.trimmingCharacters(in: .whitespacesAndNewlines)
+        searchText = author.isEmpty ? b.title : "\(b.title) by \(author)"
         selectedCoverURL = b.coverImageUrl
         suggestions = []
         showSuggestions = false
