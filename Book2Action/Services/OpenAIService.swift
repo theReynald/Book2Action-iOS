@@ -25,6 +25,53 @@ enum OpenAIService {
         }
     }
 
+    /// Lightweight validation of an OpenAI API key by calling the `/v1/models` endpoint.
+    /// Returns `.success` on HTTP 200, `.invalid` on 401/403, or `.failure` for other errors.
+    enum KeyValidationResult {
+        case success
+        case invalid(String)
+        case failure(String)
+    }
+
+    static func validateAPIKey(_ apiKey: String) async -> KeyValidationResult {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return .invalid("API key is empty.")
+        }
+        guard trimmed.hasPrefix("sk-") else {
+            return .invalid("API key should start with \"sk-\".")
+        }
+
+        guard let url = URL(string: "https://api.openai.com/v1/models") else {
+            return .failure("Invalid validation URL.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                return .failure("Unexpected response from OpenAI.")
+            }
+            switch http.statusCode {
+            case 200:
+                return .success
+            case 401:
+                return .invalid("Invalid API key. Please check it and try again.")
+            case 403:
+                return .invalid("This key is not authorized to access OpenAI.")
+            case 429:
+                return .failure("Rate limited by OpenAI. Try again shortly.")
+            default:
+                return .failure("OpenAI returned status \(http.statusCode).")
+            }
+        } catch {
+            return .failure("Couldn't reach OpenAI: \(error.localizedDescription)")
+        }
+    }
+
     static func searchBook(_ rawTitle: String, apiKey: String) async -> BookSearchResult {
         let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = title.lowercased()
