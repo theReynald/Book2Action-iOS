@@ -6,6 +6,9 @@ struct SettingsView: View {
     @State private var apiKeyDraft: String = ""
     @State private var isApiKeyVisible: Bool = false
     @State private var savedMessage: String?
+    @State private var savedMessageIsError: Bool = false
+    @State private var savedMessageIsSuccess: Bool = false
+    @State private var isValidating: Bool = false
 
     var body: some View {
         @Bindable var settings = settings
@@ -44,22 +47,36 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                 }
 
-                Button("Save API Key") {
-                    settings.apiKey = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    savedMessage = "API key saved to Keychain."
+                Button {
+                    Task { await validateAndSave() }
+                } label: {
+                    HStack {
+                        if isValidating {
+                            ProgressView()
+                        }
+                        Text(isValidating ? "Validating…" : "Save API Key")
+                    }
                 }
-                .disabled(apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(isValidating || apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 if settings.hasApiKey {
                     Button("Remove API Key", role: .destructive) {
                         settings.apiKey = ""
                         apiKeyDraft = ""
                         savedMessage = "API key removed."
+                        savedMessageIsError = false
+                        savedMessageIsSuccess = false
                     }
                 }
 
                 if let savedMessage {
-                    Text(savedMessage).font(.caption).foregroundStyle(.secondary)
+                    Text(savedMessage)
+                        .font(savedMessageIsSuccess ? .subheadline : .caption)
+                        .fontWeight(savedMessageIsSuccess ? .semibold : .regular)
+                        .foregroundStyle(
+                            savedMessageIsError ? Color.red :
+                            (savedMessageIsSuccess ? Color.green : Color.secondary)
+                        )
                 }
             } header: {
                 Text("OpenAI API Key")
@@ -85,5 +102,36 @@ struct SettingsView: View {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         return "\(v) (\(b))"
+    }
+
+    @MainActor
+    private func validateAndSave() async {
+        let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        isValidating = true
+        savedMessage = nil
+        savedMessageIsError = false
+        savedMessageIsSuccess = false
+
+        let result = await OpenAIService.validateAPIKey(trimmed)
+
+        isValidating = false
+
+        switch result {
+        case .success:
+            settings.apiKey = trimmed
+            savedMessage = "✓ API key validated and saved to Keychain."
+            savedMessageIsError = false
+            savedMessageIsSuccess = true
+        case .invalid(let reason):
+            savedMessage = "Invalid API key: \(reason)"
+            savedMessageIsError = true
+            savedMessageIsSuccess = false
+        case .failure(let reason):
+            savedMessage = "Couldn't validate key: \(reason)"
+            savedMessageIsError = true
+            savedMessageIsSuccess = false
+        }
     }
 }
