@@ -11,6 +11,8 @@ struct HomeView: View {
     @State private var isSearchingSuggestions = false
     @State private var showSuggestions = false
     @State private var selectedCoverURL: URL?
+    @State private var selectedWorkKey: String?
+    @State private var suppressNextTextChange = false
     @State private var debounceTask: Task<Void, Never>?
     @State private var trending: [TrendingBook] = TrendingBooks.random()
     @State private var placeholderIndex: Int = 0
@@ -144,6 +146,7 @@ struct HomeView: View {
                         suggestions = []
                         showSuggestions = false
                         selectedCoverURL = nil
+                        selectedWorkKey = nil
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(AppColor.textMuted(dark: isDark))
@@ -347,7 +350,15 @@ struct HomeView: View {
     // MARK: - Actions
 
     private func handleTextChange(_ newValue: String) {
+        // When the change was triggered programmatically by selectSuggestion,
+        // skip the typeahead lookup so we don't flash "No books found" or
+        // re-open the dropdown right before kicking off Get Insights.
+        if suppressNextTextChange {
+            suppressNextTextChange = false
+            return
+        }
         selectedCoverURL = nil
+        selectedWorkKey = nil
         debounceTask?.cancel()
         let trimmed = newValue.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
@@ -371,10 +382,19 @@ struct HomeView: View {
     }
 
     private func selectSuggestion(_ b: OpenLibraryBook) {
-        searchText = b.title
+        // Include the author so OpenAI returns the exact edition the user picked
+        // (otherwise a title like "The Intruder" matches many different books).
+        let author = b.author.trimmingCharacters(in: .whitespacesAndNewlines)
+        suppressNextTextChange = true
+        searchText = author.isEmpty ? b.title : "\(b.title) by \(author)"
         selectedCoverURL = b.coverImageUrl
+        selectedWorkKey = b.id
         suggestions = []
         showSuggestions = false
+        isSearchingSuggestions = false
+        debounceTask?.cancel()
+        // Tapping a suggestion is an explicit choice — go straight to analysis.
+        Task { await runSearch() }
     }
 
     private func runSearch() async {
@@ -387,7 +407,15 @@ struct HomeView: View {
         bookStore.isLoading = true
         bookStore.errorMessage = nil
 
-        let result = await OpenAIService.searchBook(trimmed, apiKey: settings.apiKey)
+        // If the user picked an OpenLibrary suggestion, fetch verified metadata
+        // so the prompt is grounded in real synopsis/subjects (lets the model
+        // analyze books that aren't in its training data).
+        var enrichment: BookEnrichment? = nil
+        if let workKey = selectedWorkKey {
+            enrichment = await OpenLibraryService.fetchWorkDetails(workKey: workKey)
+        }
+
+        let result = await OpenAIService.searchBook(trimmed, apiKey: settings.apiKey, enrichment: enrichment)
 
         await MainActor.run {
             bookStore.isLoading = false

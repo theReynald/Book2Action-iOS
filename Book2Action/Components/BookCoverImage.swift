@@ -5,13 +5,17 @@ import SwiftUI
 struct BookCoverImage: View {
     let isbn: String?
     let title: String
+    var explicitURL: URL? = nil
     var width: CGFloat = 120
     var height: CGFloat = 180
 
-    @State private var stage: Int = 0  // 0 = primary, 1 = google, 2 = title, 3 = placeholder
+    @State private var stage: Int = 0  // 0 = explicit/primary, then fallbacks, then placeholder
 
     private var candidates: [URL] {
-        CoverImage.fallbackURLs(isbn: isbn, title: title)
+        var urls: [URL] = []
+        if let explicitURL { urls.append(explicitURL) }
+        urls.append(contentsOf: CoverImage.fallbackURLs(isbn: isbn, title: title))
+        return urls
     }
 
     var body: some View {
@@ -24,11 +28,15 @@ struct BookCoverImage: View {
                     case .success(let img):
                         img.resizable().scaledToFill()
                     case .failure:
-                        Color.clear.onAppear { advanceStage() }
+                        // Always show the placeholder while we try the next URL —
+                        // never render Color.clear, which leaves an invisible gap
+                        // if onAppear-driven advancement stalls.
+                        placeholder.onAppear { advanceStage() }
                     @unknown default:
                         placeholder
                     }
                 }
+                .id(stage)
             } else {
                 placeholder
             }

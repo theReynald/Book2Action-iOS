@@ -77,7 +77,13 @@ struct BookResultView: View {
 
     private func headerCard(_ book: Book) -> some View {
         HStack(alignment: .top, spacing: 16) {
-            BookCoverImage(isbn: book.isbn, title: book.title, width: 110, height: 165)
+            BookCoverImage(
+                isbn: book.isbn,
+                title: book.title,
+                explicitURL: book.coverImageUrl.flatMap(URL.init(string:)),
+                width: 110,
+                height: 165
+            )
             VStack(alignment: .leading, spacing: 6) {
                 Text(book.title)
                     .font(.title3.bold())

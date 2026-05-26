@@ -72,9 +72,10 @@ enum OpenAIService {
         }
     }
 
-    static func searchBook(_ rawTitle: String, apiKey: String) async -> BookSearchResult {
-        let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = title.lowercased()
+    static func searchBook(_ rawTitle: String, apiKey: String, enrichment: BookEnrichment? = nil) async -> BookSearchResult {
+        let raw = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let (title, author) = splitTitleAndAuthor(raw)
+        let normalized = raw.lowercased()
 
         if !ContentFilter.isAppropriate(normalized) {
             return .init(success: false,
@@ -90,7 +91,7 @@ enum OpenAIService {
         }
 
         do {
-            let book = try await generateBookAnalysis(for: title, apiKey: apiKey)
+            let book = try await generateBookAnalysis(for: title, author: author, apiKey: apiKey, enrichment: enrichment)
             return .init(success: true, book: book)
         } catch ServiceError.notFound {
             return .init(
@@ -104,9 +105,58 @@ enum OpenAIService {
 
     // MARK: - Private
 
-    private static func generateBookAnalysis(for title: String, apiKey: String) async throws -> Book {
+    /// Splits a query like `"The Intruder by Miriam MacGregor"` into
+    /// `(title: "The Intruder", author: "Miriam MacGregor")`. If no `" by "`
+    /// separator is found, returns the whole string as the title and a nil author.
+    private static func splitTitleAndAuthor(_ raw: String) -> (title: String, author: String?) {
+        let separator = " by "
+        guard let range = raw.range(of: separator, options: [.caseInsensitive, .backwards]) else {
+            return (raw, nil)
+        }
+        let title = raw[..<range.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        let author = raw[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.isEmpty || author.isEmpty {
+            return (raw, nil)
+        }
+        return (title, author)
+    }
+
+    private static func generateBookAnalysis(for title: String, author: String?, apiKey: String, enrichment: BookEnrichment? = nil) async throws -> Book {
+        let authorHint: String
+        if let author, !author.isEmpty {
+            authorHint = """
+            \n\nIMPORTANT — the user picked this title together with the author "\(author)".
+            - If you recognize a real book by this exact title and author, analyze THAT specific edition (do not switch to a more famous book that shares the title).
+            - If you do not recognize this specific edition, DO NOT return notFound. Instead, use the title "\(title)" plus any general knowledge of "\(author)" (their typical genre/themes if any) and craft a thematically appropriate analysis. Set "author" in the JSON to "\(author)" exactly.
+            """
+        } else {
+            authorHint = ""
+        }
+
+        let enrichmentHint: String = {
+            guard let enrichment else { return "" }
+            var lines: [String] = []
+            if let desc = enrichment.description {
+                // Cap description to keep token usage reasonable.
+                let capped = desc.count > 2000 ? String(desc.prefix(2000)) + "…" : desc
+                lines.append("Synopsis (from OpenLibrary): \(capped)")
+            }
+            if !enrichment.subjects.isEmpty {
+                let subjects = enrichment.subjects.prefix(15).joined(separator: ", ")
+                lines.append("Subjects/themes: \(subjects)")
+            }
+            if let year = enrichment.firstPublishYear {
+                lines.append("First published: \(year)")
+            }
+            guard !lines.isEmpty else { return "" }
+            return """
+            \n\nGROUND TRUTH — the following metadata about this exact book was retrieved from OpenLibrary and is verified. Treat it as authoritative and base your analysis on it (do NOT return notFound; do NOT substitute a different book with the same title):
+            \(lines.joined(separator: "\n"))
+            """
+        }()
+
         let userPrompt = """
-        Analyze the book "\(title)" and provide a comprehensive response in the following JSON format:
+        Analyze the book "\(title)"\(authorHint)\(enrichmentHint) and provide a comprehensive response in the following JSON format:
 
         {
           "title": "Exact book title",
@@ -138,7 +188,8 @@ enum OpenAIService {
         - ALWAYS try to find a book first. The input may be a book title, movie, TV show, video game, or other media.
         - If the input is a movie, TV show, or video game, find the official novelization, tie-in novel, or "making of" companion book and analyze that.
         - If you cannot find an exact novelization, find the CLOSEST related book on the same subject/franchise and analyze that — do NOT return notFound for well-known media.
-        - Only respond with {"notFound": true} if the input is gibberish, nonsensical, or has no plausible book/novelization/related work whatsoever.
+        - When an author name is provided, prefer that author's edition; if you don't recognize it, still produce a useful analysis based on the title and any general knowledge of the author rather than returning notFound.
+        - Only respond with {"notFound": true} if the input is gibberish or nonsensical with no plausible meaning whatsoever.
         - The summary should be 3 substantial paragraphs
         - Provide exactly 7 actionable steps, one for each day of the week (Monday through Sunday)
         - Each step should have detailed implementation information

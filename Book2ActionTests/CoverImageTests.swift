@@ -4,7 +4,7 @@ import XCTest
 final class CoverImageTests: XCTestCase {
     func testPrimaryUsesISBN() {
         let url = CoverImage.primaryURL(isbn: "9780735211292", title: "Atomic Habits")
-        XCTAssertEqual(url?.absoluteString, "https://covers.openlibrary.org/b/isbn/9780735211292-L.jpg")
+        XCTAssertEqual(url?.absoluteString, "https://covers.openlibrary.org/b/isbn/9780735211292-L.jpg?default=false")
     }
 
     func testPrimaryFallsBackToTitle() {
