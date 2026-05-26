@@ -261,7 +261,12 @@ struct HomeView: View {
     private var loadingCard: some View {
         @Bindable var bookStore = bookStore
         return VStack(spacing: 12) {
-            ProgressView().scaleEffect(1.4).tint(AppColor.primary)
+            if let gifURL = URL(string: "https://media.giphy.com/media/LYBMuRwH3JkhdmLbGE/giphy.gif") {
+                AnimatedGIFView(url: gifURL)
+                    .frame(width: 120, height: 120)
+            } else {
+                ProgressView().scaleEffect(1.4).tint(AppColor.primary)
+            }
             Text("Our AI is reading through \"\(bookStore.searchTitle)\" to create a custom 7-day action plan…")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(AppColor.primaryLight)
