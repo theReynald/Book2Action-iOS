@@ -28,11 +28,15 @@ struct BookCoverImage: View {
                     case .success(let img):
                         img.resizable().scaledToFill()
                     case .failure:
-                        Color.clear.onAppear { advanceStage() }
+                        // Always show the placeholder while we try the next URL —
+                        // never render Color.clear, which leaves an invisible gap
+                        // if onAppear-driven advancement stalls.
+                        placeholder.onAppear { advanceStage() }
                     @unknown default:
                         placeholder
                     }
                 }
+                .id(stage)
             } else {
                 placeholder
             }
