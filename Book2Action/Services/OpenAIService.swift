@@ -286,13 +286,13 @@ enum OpenAIService {
               "chapter": "If a VERIFIED CHAPTER LIST is provided above, pick a chapter from it and copy the text VERBATIM (including any chapter number). Otherwise, give the exact chapter number and title ONLY if you are highly confident it is correct for THIS book; if not confident, write a thematic descriptor (e.g. 'Discussed throughout the book' or 'Section on <topic>'). NEVER invent chapter numbers or titles.",
               "details": {
                 "sentences": [
-                  "Detailed explanation sentence 1",
-                  "Detailed explanation sentence 2",
-                  "Detailed explanation sentence 3",
-                  "Detailed explanation sentence 4",
-                  "Detailed explanation sentence 5"
+                  "First concrete action the reader takes today to carry out the step (e.g. for 'Examine racial dynamics and systemic inequality': 'Pick one institution you interact with this week — your workplace, school, or local government — and write down three policies or norms that shape who gets access and who doesn't.').",
+                  "Second concrete action that deepens or builds on the first, with a specific example or scenario.",
+                  "Third concrete action — a way to apply the step in a conversation, relationship, or daily routine.",
+                  "A common pitfall, blind spot, or oversimplification to watch out for while doing this, and how to handle it.",
+                  "A reflection prompt or measurable signal to check whether the step landed (a journal question, a metric, a checkpoint)."
                 ],
-                "keyTakeaway": "The core lesson to remember from this action step"
+                "keyTakeaway": "2-3 sentences. Start by grounding the lesson in the specific chapter just referenced — name the chapter and the idea from it. Then state the durable insight for the reader's own life. End with a one-line segue into the detailed implementation below (e.g. 'Here's how to put that into practice today:')."
               }
             }
           ]
@@ -309,6 +309,14 @@ enum OpenAIService {
         - Each step should have detailed implementation information
         - Include the correct ISBN-13 number for accurate book identification
         - CHAPTER ACCURACY: If a VERIFIED CHAPTER LIST is provided in the GROUND TRUTH section above, the "chapter" field for every actionable step MUST be copied VERBATIM from that list — do not paraphrase, do not invent chapters not in the list. If no chapter list is provided, cite a specific chapter number/title ONLY when highly confident; otherwise use a thematic descriptor such as "Discussed throughout the book". DO NOT invent or guess chapter numbers or chapter titles — fabricated citations are worse than generic ones.
+        - KEY TAKEAWAY DEPTH: The "keyTakeaway" must be 2-3 sentences (not one short sentence). It must explicitly reference the chapter cited in the "chapter" field and connect the lesson to that chapter's actual themes — generic life advice disconnected from the chapter is NOT acceptable. End the takeaway with a brief segue into the detailed implementation (e.g. "Here's how to apply that this week:" or "Put that into practice with the steps below.").
+        - DETAILED IMPLEMENTATION RULES (strict):
+          * Every sentence in "details.sentences" must be a CONCRETE ACTION the reader performs in their real life to carry out the step. It must work as a standalone instruction.
+          * Do NOT mention the chapter, the book, or the author in "details.sentences". The chapter reference belongs ONLY in "keyTakeaway".
+          * Do NOT tell the reader to "read the chapter", "revisit the book", "study the text", or anything similar. Assume the reader has read the book.
+          * Do NOT restate the summary or the takeaway. Do not explain what the chapter is about here.
+          * Each sentence should illustrate HOW to do the step (e.g. for "Examine racial dynamics and systemic inequality": pick a specific institution to audit, list policies to map, conversations to have, biases to check, journaling prompts to use).
+          * Use imperative voice ("Identify…", "Map…", "Schedule a 15-minute conversation with…", "Track for one week…", "Ask yourself…").
 
         Respond with ONLY the JSON object.
 
