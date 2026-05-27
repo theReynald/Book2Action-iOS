@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct BookResultView: View {
     @Environment(BookStore.self) private var bookStore
@@ -6,9 +7,10 @@ struct BookResultView: View {
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.openURL) private var openURL
 
-    @State private var shareURL: URL?
+    @State private var shareItems: [Any] = []
     @State private var showShareSheet = false
     @State private var toastMessage: String?
+    @State private var isPreparingShare = false
 
     private var isDark: Bool {
         switch theme.mode {
@@ -59,9 +61,20 @@ struct BookResultView: View {
                         Label("Buy on Amazon", systemImage: "cart")
                     }
                     Button {
+                        Task { await shareBook(book) }
+                    } label: {
+                        Label("Share book", systemImage: "square.and.arrow.up.on.square")
+                    }
+                    .disabled(isPreparingShare)
+                    Button {
+                        postToX(book)
+                    } label: {
+                        Label("Post to X", systemImage: "text.bubble")
+                    }
+                    Button {
                         exportPDF(book)
                     } label: {
-                        Label("Export PDF", systemImage: "square.and.arrow.up")
+                        Label("Export PDF", systemImage: "doc.richtext")
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -69,7 +82,7 @@ struct BookResultView: View {
             }
         }
         .sheet(isPresented: $showShareSheet) {
-            if let shareURL { ShareSheet(items: [shareURL]) }
+            ShareSheet(items: shareItems)
         }
     }
 
@@ -209,10 +222,94 @@ struct BookResultView: View {
     private func exportPDF(_ book: Book) {
         do {
             let url = try PDFExporter.export(book)
-            shareURL = url
+            shareItems = [url]
             showShareSheet = true
         } catch {
             Task { await showToast("PDF export failed") }
+        }
+    }
+
+    @MainActor
+    private func shareBook(_ book: Book) async {
+        isPreparingShare = true
+        defer { isPreparingShare = false }
+
+        let firstSteps = book.actionableSteps.prefix(3)
+            .map { "• \($0.step)" }
+            .joined(separator: "\n")
+        var text = "\"\(book.title)\" by \(book.author) — my 7-day action plan 📚"
+        if !firstSteps.isEmpty { text += "\n\n\(firstSteps)" }
+        text += "\n\nBuilt with Book2Action."
+
+        var items: [Any] = [text]
+        if let urlStr = book.coverImageUrl,
+           let url = URL(string: urlStr),
+           let image = await loadImage(from: url) {
+            items.append(image)
+        }
+        if let amazon = AmazonLinks.searchURL(title: book.title, author: book.author, isbn: book.isbn) {
+            items.append(amazon)
+        }
+        shareItems = items
+        showShareSheet = true
+    }
+
+    private func loadImage(from url: URL) async -> UIImage? {
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            return UIImage(data: data)
+        } catch {
+            return nil
+        }
+    }
+
+    private func postToX(_ book: Book) {
+        let amazon = AmazonLinks.searchURL(title: book.title, author: book.author, isbn: book.isbn)
+        let separator = "──────────"
+
+        var lines: [String] = []
+        lines.append("📚 \"\(book.title)\" by \(book.author)")
+        lines.append("")
+        let summary = Self.shortSummary(book.summary, maxSentences: 5)
+        if !summary.isEmpty {
+            lines.append(summary)
+            lines.append("")
+        }
+        if !book.actionableSteps.isEmpty {
+            lines.append(separator)
+            lines.append("My 7-day action plan:")
+            lines.append("")
+            for (i, step) in book.actionableSteps.enumerated() {
+                let prefix = step.day ?? "Day \(i + 1)"
+                lines.append("\(prefix): \(step.step)")
+                lines.append("")
+            }
+        }
+        lines.append("Built with Book2Action 🚀")
+        let text = lines.joined(separator: "\n")
+
+        let encodedText = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let encodedURL = amazon?.absoluteString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+
+        var deepLinkString = "twitter://post?message=\(encodedText)"
+        if !encodedURL.isEmpty {
+            deepLinkString += "%0A\(encodedURL)"
+        }
+
+        var webString = "https://x.com/intent/post?text=\(encodedText)"
+        if !encodedURL.isEmpty {
+            webString += "&url=\(encodedURL)"
+        }
+        let webURL = URL(string: webString)
+
+        if let deepLink = URL(string: deepLinkString) {
+            UIApplication.shared.open(deepLink, options: [:]) { success in
+                if !success, let webURL {
+                    UIApplication.shared.open(webURL)
+                }
+            }
+        } else if let webURL {
+            openURL(webURL)
         }
     }
 
@@ -221,5 +318,18 @@ struct BookResultView: View {
         withAnimation { toastMessage = message }
         try? await Task.sleep(nanoseconds: 2_500_000_000)
         withAnimation { toastMessage = nil }
+    }
+
+    private static func shortSummary(_ raw: String, maxSentences: Int) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        var sentences: [String] = []
+        trimmed.enumerateSubstrings(in: trimmed.startIndex..., options: [.bySentences, .localized]) { substring, _, _, stop in
+            if let s = substring?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+                sentences.append(s)
+                if sentences.count >= maxSentences { stop = true }
+            }
+        }
+        return sentences.joined(separator: " ")
     }
 }
