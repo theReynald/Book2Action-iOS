@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 @main
 struct Book2ActionApp: App {
@@ -14,6 +15,7 @@ struct Book2ActionApp: App {
                 .environment(settings)
                 .preferredColorScheme(theme.colorScheme)
         }
+        .modelContainer(for: CachedBook.self)
     }
 }
 

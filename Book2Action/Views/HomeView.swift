@@ -1,10 +1,22 @@
 import SwiftUI
+import SwiftData
 
 struct HomeView: View {
     @Environment(ThemeStore.self) private var theme
     @Environment(BookStore.self) private var bookStore
     @Environment(SettingsStore.self) private var settings
     @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.modelContext) private var modelContext
+
+    /// Most-recently-viewed cached books, newest first. Limited to a small
+    /// window so the Home screen stays light; full history can live behind
+    /// a dedicated screen later.
+    @Query(
+        sort: \CachedBook.lastViewedAt,
+        order: .reverse,
+        animation: .default
+    )
+    private var recentBooks: [CachedBook]
 
     @State private var searchText = ""
     @State private var suggestions: [OpenLibraryBook] = []
@@ -65,6 +77,9 @@ struct HomeView: View {
                     } else {
                         if !hasAPIKey {
                             noKeyHint
+                        }
+                        if !recentBooks.isEmpty {
+                            recentlyViewedSection
                         }
                         trendingSection
                     }
@@ -376,6 +391,63 @@ struct HomeView: View {
         )
     }
 
+    // MARK: - Recently Viewed
+
+    /// Horizontal carousel of previously-analyzed books. Tapping one re-opens
+    /// the cached analysis instantly (no OpenAI call, no key required).
+    private var recentlyViewedSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Recently viewed")
+                    .font(.headline)
+                    .foregroundStyle(AppColor.text(dark: isDark))
+                Spacer()
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(recentBooks.prefix(20)) { entry in
+                        Button {
+                            openCached(entry)
+                        } label: {
+                            VStack(spacing: 6) {
+                                BookCoverImage(isbn: nil, title: entry.title, explicitURL: entry.coverImageURL.flatMap(URL.init(string:)), width: 100, height: 150)
+                                Text(entry.title)
+                                    .font(.caption.weight(.medium))
+                                    .lineLimit(2)
+                                    .foregroundStyle(AppColor.text(dark: isDark))
+                                Text(entry.author)
+                                    .font(.caption2)
+                                    .foregroundStyle(AppColor.textMuted(dark: isDark))
+                                    .lineLimit(1)
+                            }
+                            .frame(width: 110)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                BookCacheStore(context: modelContext).remove(entry)
+                            } label: {
+                                Label("Remove", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private func openCached(_ entry: CachedBook) {
+        @Bindable var bookStore = bookStore
+        guard let book = try? JSONDecoder().decode(Book.self, from: entry.bookData) else { return }
+        entry.lastViewedAt = .now
+        try? modelContext.save()
+        bookStore.errorMessage = nil
+        bookStore.currentBook = book
+        bookStore.path.append(.bookResult)
+    }
+
     private var trendingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -490,6 +562,22 @@ struct HomeView: View {
         bookStore.isLoading = true
         bookStore.errorMessage = nil
 
+        // Cache hit: short-circuit the API call entirely.
+        let (parsedTitle, parsedAuthor) = Self.splitTitleAndAuthor(trimmed)
+        let cache = BookCacheStore(context: modelContext)
+        if let cached = cache.lookup(title: parsedTitle, author: parsedAuthor) {
+            await MainActor.run {
+                bookStore.isLoading = false
+                var book = cached
+                if let selected = selectedCoverURL {
+                    book.coverImageUrl = selected.absoluteString
+                }
+                bookStore.currentBook = book
+                bookStore.path.append(.bookResult)
+            }
+            return
+        }
+
         // If the user picked an OpenLibrary suggestion, fetch verified metadata
         // so the prompt is grounded in real synopsis/subjects (lets the model
         // analyze books that aren't in its training data).
@@ -506,12 +594,28 @@ struct HomeView: View {
                 if let selected = selectedCoverURL {
                     book.coverImageUrl = selected.absoluteString
                 }
+                cache.save(book)
                 bookStore.currentBook = book
                 bookStore.path.append(.bookResult)
             } else {
                 bookStore.errorMessage = result.error ?? "Failed to find book"
             }
         }
+    }
+
+    /// Local copy of `OpenAIService.splitTitleAndAuthor` so we can derive the
+    /// cache key without exposing the service's private helper.
+    private static func splitTitleAndAuthor(_ raw: String) -> (title: String, author: String?) {
+        let separator = " by "
+        guard let range = raw.range(of: separator, options: [.caseInsensitive, .backwards]) else {
+            return (raw, nil)
+        }
+        let title = raw[..<range.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        let author = raw[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.isEmpty || author.isEmpty {
+            return (raw, nil)
+        }
+        return (title, author)
     }
 }
 
@@ -522,4 +626,5 @@ struct HomeView: View {
             .environment(BookStore())
             .environment(SettingsStore())
     }
+    .modelContainer(for: CachedBook.self, inMemory: true)
 }
