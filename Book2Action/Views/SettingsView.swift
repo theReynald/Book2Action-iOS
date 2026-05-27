@@ -1,8 +1,10 @@
 import SwiftUI
+import SwiftData
 
 struct SettingsView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(ThemeStore.self) private var theme
+    @Environment(\.modelContext) private var modelContext
     @State private var apiKeyDraft: String = ""
     @State private var isApiKeyVisible: Bool = false
     @State private var savedMessage: String?
@@ -10,6 +12,8 @@ struct SettingsView: View {
     @State private var savedMessageIsSuccess: Bool = false
     @State private var isValidating: Bool = false
     @State private var showTutorial: Bool = false
+    @State private var showClearRecentsConfirm: Bool = false
+    @State private var recentsCleared: Bool = false
 
     /// YouTube video ID for the in-app tutorial. Replace to update without
     /// shipping a new build (just upload a new YouTube video and swap the ID).
@@ -103,6 +107,23 @@ struct SettingsView: View {
                 Text("A short walkthrough showing how to set up your API key and use the app.")
             }
 
+            Section {
+                Button(role: .destructive) {
+                    showClearRecentsConfirm = true
+                } label: {
+                    Label("Clear recently reviewed", systemImage: "trash")
+                }
+                if recentsCleared {
+                    Text("✓ Recently reviewed cleared.")
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                }
+            } header: {
+                Text("Data")
+            } footer: {
+                Text("Removes all books from the Recently Reviewed list on Home. Bundled sample books are unaffected.")
+            }
+
             Section("About") {
                 LabeledContent("Version", value: appVersion)
                 Link(destination: URL(string: "https://github.com/theReynald/Book2Action")!) {
@@ -117,6 +138,27 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showTutorial) {
             YouTubePlayerSheet(videoID: tutorialVideoID, title: "Tutorial")
+        }
+        .confirmationDialog(
+            "Clear recently reviewed?",
+            isPresented: $showClearRecentsConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Clear", role: .destructive) {
+                clearRecents()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will remove all books from your Recently Reviewed list. This cannot be undone.")
+        }
+    }
+
+    @MainActor
+    private func clearRecents() {
+        BookCacheStore(context: modelContext).clearAll()
+        recentsCleared = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            recentsCleared = false
         }
     }
 

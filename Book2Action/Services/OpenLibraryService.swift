@@ -14,6 +14,11 @@ struct BookEnrichment: Sendable {
     var description: String?
     var subjects: [String]
     var firstPublishYear: Int?
+    /// Verbatim chapter list from OpenLibrary's `table_of_contents` field.
+    /// Empty when the work record doesn't include one (common for older or
+    /// less-cataloged works). When non-empty, this is treated as authoritative
+    /// by the OpenAI prompt for chapter citations.
+    var tableOfContents: [String] = []
 }
 
 enum OpenLibraryService {
@@ -113,7 +118,8 @@ enum OpenLibraryService {
             return BookEnrichment(
                 description: description,
                 subjects: work.subjects ?? [],
-                firstPublishYear: year
+                firstPublishYear: year,
+                tableOfContents: (work.table_of_contents ?? []).compactMap { $0.displayString }
             )
         } catch {
             return nil
@@ -124,6 +130,37 @@ enum OpenLibraryService {
         var description: DescriptionField?
         var subjects: [String]?
         var first_publish_date: String?
+        var table_of_contents: [TOCEntry]?
+    }
+
+    /// OpenLibrary's `table_of_contents` entries are objects with a mix of
+    /// `title`, `label`, and `level` fields. We only need a human-readable
+    /// string per chapter — prefer the title, fall back to label-only if
+    /// title is missing. Sub-entries (level > 0) are filtered out so the
+    /// prompt only sees top-level chapters.
+    private struct TOCEntry: Decodable {
+        var title: String?
+        var label: String?
+        var level: Int?
+
+        var displayString: String? {
+            if let level, level > 0 { return nil }
+            let t = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let l = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let titleClean = (t?.isEmpty == false) ? t : nil
+            let labelClean = (l?.isEmpty == false) ? l : nil
+            switch (titleClean, labelClean) {
+            case let (.some(title), .some(label)):
+                if title.lowercased().hasPrefix(label.lowercased()) { return title }
+                return "\(label). \(title)"
+            case let (.some(title), .none):
+                return title
+            case let (.none, .some(label)):
+                return label
+            case (.none, .none):
+                return nil
+            }
+        }
     }
 
     /// OpenLibrary returns `description` as either a plain string or an object

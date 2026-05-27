@@ -1,11 +1,11 @@
 import Foundation
 
-/// Calls OpenAI's chat completions endpoint (gpt-4o-mini, JSON mode) to
+/// Calls OpenAI's chat completions endpoint (gpt-4o, JSON mode) to
 /// turn a book title into a structured 7-day action plan, matching the
 /// behavior of the original mobile app's openRouterService.ts.
 enum OpenAIService {
     private static let endpoint = URL(string: "https://api.openai.com/v1/chat/completions")!
-    private static let model = "gpt-4o-mini"
+    private static let model = "gpt-4o"
 
     enum ServiceError: LocalizedError {
         case missingAPIKey
@@ -121,7 +121,109 @@ enum OpenAIService {
         return (title, author)
     }
 
+    /// Asks the model in a single-purpose call for the verbatim table of
+    /// contents of `title` (optionally by `author`). The model is instructed
+    /// to return an empty array when it isn't highly confident, so a non-empty
+    /// result is the model's own attestation that it recalls the ToC.
+    ///
+    /// Used as a third-tier fallback after OpenLibrary's `table_of_contents`
+    /// field and the hand-curated `BundledTableOfContents` map.
+    private static func fetchTableOfContents(title: String, author: String?, apiKey: String) async throws -> [String] {
+        let authorClause = author.map { " by \($0)" } ?? ""
+        let userPrompt = """
+        I need the verbatim table of contents for the book "\(title)"\(authorClause).
+
+        Return JSON in this exact shape:
+        {
+          "tableOfContents": [
+            "Chapter 1: Title of chapter one",
+            "Chapter 2: Title of chapter two"
+          ]
+        }
+
+        Rules:
+        - Each entry is the chapter heading as printed in the book, including the chapter number when the book uses one (e.g. "Chapter 5: The End of Time Management" or "Ch 1: Showing Up").
+        - List ONLY top-level chapters. Skip the preface/introduction/acknowledgements unless they are numbered chapters in the book.
+        - List them in the order they appear in the book.
+        - For well-known published books that you can recall, provide the chapter list. Use your knowledge of the book.
+        - ONLY return {"tableOfContents": []} if the book is obscure, fictional/made-up, or you genuinely have no recollection of its chapter structure. Do NOT invent chapter titles for unknown books.
+        - Respond with ONLY the JSON object.
+        """
+
+        let body: [String: Any] = [
+            "model": model,
+            "messages": [
+                [
+                    "role": "system",
+                    "content": "You are a careful librarian. You return only JSON. You never fabricate chapter titles — returning an empty array is always preferable to guessing."
+                ],
+                ["role": "user", "content": userPrompt]
+            ],
+            "temperature": 0.0,
+            "max_tokens": 1500,
+            "response_format": ["type": "json_object"]
+        ]
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse).map({ (200...299).contains($0.statusCode) }) == true else {
+            return []
+        }
+
+        struct ChatResponse: Decodable {
+            struct Choice: Decodable { struct Msg: Decodable { let content: String }; let message: Msg }
+            let choices: [Choice]
+        }
+        struct TOCEnvelope: Decodable { let tableOfContents: [String]? }
+
+        guard let chat = try? JSONDecoder().decode(ChatResponse.self, from: data),
+              let content = chat.choices.first?.message.content,
+              let contentData = content.data(using: .utf8),
+              let envelope = try? JSONDecoder().decode(TOCEnvelope.self, from: contentData) else {
+            return []
+        }
+        return (envelope.tableOfContents ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
     private static func generateBookAnalysis(for title: String, author: String?, apiKey: String, enrichment: BookEnrichment? = nil) async throws -> Book {
+        // If the live enrichment doesn't carry a ToC, try the bundled fallback
+        // for popular titles so the prompt can still ground chapter citations.
+        var effectiveEnrichment: BookEnrichment? = {
+            guard let bundled = BundledTableOfContents.lookup(title: title) else { return enrichment }
+            if var e = enrichment {
+                if e.tableOfContents.isEmpty { e.tableOfContents = bundled }
+                return e
+            }
+            return BookEnrichment(description: nil, subjects: [], firstPublishYear: nil, tableOfContents: bundled)
+        }()
+
+        // Third-tier fallback: if no ToC came from OpenLibrary or the bundled
+        // list, ask the model itself in a dedicated, single-purpose call where
+        // its full attention is on factual chapter recall (not analysis).
+        // The call returns an empty list when the model isn't confident.
+        if (effectiveEnrichment?.tableOfContents ?? []).isEmpty {
+            let llmTOC = (try? await fetchTableOfContents(title: title, author: author, apiKey: apiKey)) ?? []
+            print("[OpenAIService] fetchTableOfContents(\(title)) returned \(llmTOC.count) entries")
+            if !llmTOC.isEmpty {
+                if var e = effectiveEnrichment {
+                    e.tableOfContents = llmTOC
+                    effectiveEnrichment = e
+                } else {
+                    effectiveEnrichment = BookEnrichment(description: nil, subjects: [], firstPublishYear: nil, tableOfContents: llmTOC)
+                }
+            }
+        } else {
+            print("[OpenAIService] ToC already present (\(effectiveEnrichment?.tableOfContents.count ?? 0) entries), skipping LLM fetch")
+        }
+
         let authorHint: String
         if let author, !author.isEmpty {
             authorHint = """
@@ -134,7 +236,7 @@ enum OpenAIService {
         }
 
         let enrichmentHint: String = {
-            guard let enrichment else { return "" }
+            guard let enrichment = effectiveEnrichment else { return "" }
             var lines: [String] = []
             if let desc = enrichment.description {
                 // Cap description to keep token usage reasonable.
@@ -148,11 +250,23 @@ enum OpenAIService {
             if let year = enrichment.firstPublishYear {
                 lines.append("First published: \(year)")
             }
-            guard !lines.isEmpty else { return "" }
-            return """
-            \n\nGROUND TRUTH — the following metadata about this exact book was retrieved from OpenLibrary and is verified. Treat it as authoritative and base your analysis on it (do NOT return notFound; do NOT substitute a different book with the same title):
-            \(lines.joined(separator: "\n"))
-            """
+            var groundTruth = ""
+            if !lines.isEmpty {
+                groundTruth += """
+                \n\nGROUND TRUTH — the following metadata about this exact book was retrieved from OpenLibrary and is verified. Treat it as authoritative and base your analysis on it (do NOT return notFound; do NOT substitute a different book with the same title):
+                \(lines.joined(separator: "\n"))
+                """
+            }
+            if !enrichment.tableOfContents.isEmpty {
+                let toc = enrichment.tableOfContents.enumerated()
+                    .map { "  - \($0.element)" }
+                    .joined(separator: "\n")
+                groundTruth += """
+                \n\nVERIFIED CHAPTER LIST (from OpenLibrary's table_of_contents) — this is the AUTHORITATIVE list of chapters for this book. When filling the "chapter" field for each actionable step, you MUST pick a chapter from THIS list and copy its text VERBATIM. Do NOT invent chapters not in this list. Do NOT paraphrase.
+                \(toc)
+                """
+            }
+            return groundTruth
         }()
 
         let userPrompt = """
@@ -169,7 +283,7 @@ enum OpenAIService {
             {
               "day": "Monday",
               "step": "Specific actionable step that readers can implement",
-              "chapter": "Chapter or section where this concept is primarily discussed",
+              "chapter": "If a VERIFIED CHAPTER LIST is provided above, pick a chapter from it and copy the text VERBATIM (including any chapter number). Otherwise, give the exact chapter number and title ONLY if you are highly confident it is correct for THIS book; if not confident, write a thematic descriptor (e.g. 'Discussed throughout the book' or 'Section on <topic>'). NEVER invent chapter numbers or titles.",
               "details": {
                 "sentences": [
                   "Detailed explanation sentence 1",
@@ -194,6 +308,7 @@ enum OpenAIService {
         - Provide exactly 7 actionable steps, one for each day of the week (Monday through Sunday)
         - Each step should have detailed implementation information
         - Include the correct ISBN-13 number for accurate book identification
+        - CHAPTER ACCURACY: If a VERIFIED CHAPTER LIST is provided in the GROUND TRUTH section above, the "chapter" field for every actionable step MUST be copied VERBATIM from that list — do not paraphrase, do not invent chapters not in the list. If no chapter list is provided, cite a specific chapter number/title ONLY when highly confident; otherwise use a thematic descriptor such as "Discussed throughout the book". DO NOT invent or guess chapter numbers or chapter titles — fabricated citations are worse than generic ones.
 
         Respond with ONLY the JSON object.
 
