@@ -27,7 +27,8 @@ struct HomeView: View {
     @State private var selectedWorkKey: String?
     @State private var suppressNextTextChange = false
     @State private var debounceTask: Task<Void, Never>?
-    @State private var trending: [TrendingBook] = BundledBooks.trending
+    @State private var trending: [TrendingBook] = []
+    @State private var classics: [TrendingBook] = ClassicBooks.random()
     @State private var placeholderIndex: Int = 0
     @State private var showNoKeyAlert = false
 
@@ -85,7 +86,10 @@ struct HomeView: View {
                         if !recentBooks.isEmpty {
                             recentlyViewedSection
                         }
-                        trendingSection
+                        if hasAPIKey {
+                            trendingSection
+                        }
+                        classicsSection
                     }
                 }
                 .padding(20)
@@ -95,13 +99,15 @@ struct HomeView: View {
             }
             .scrollDismissesKeyboard(.immediately)
             .refreshable {
-                trending = hasAPIKey ? TrendingBooks.random() : BundledBooks.trending
+                if hasAPIKey { trending = TrendingBooks.random() }
+                classics = ClassicBooks.random()
             }
             .onAppear {
-                trending = hasAPIKey ? TrendingBooks.random() : BundledBooks.trending
+                if hasAPIKey, trending.isEmpty { trending = TrendingBooks.random() }
+                if classics.isEmpty { classics = ClassicBooks.random() }
             }
             .onChange(of: settings.apiKey) { _, _ in
-                trending = hasAPIKey ? TrendingBooks.random() : BundledBooks.trending
+                trending = hasAPIKey ? TrendingBooks.random() : []
             }
         }
         .navigationBarHidden(true)
@@ -459,23 +465,65 @@ struct HomeView: View {
     private var trendingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(hasAPIKey ? "Try one of these" : "Try one of these (works offline)")
+                Text("Trending")
                     .font(.headline)
                     .foregroundStyle(AppColor.text(dark: isDark))
                 Spacer()
-                if hasAPIKey {
-                    Button {
-                        trending = TrendingBooks.random()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .foregroundStyle(AppColor.textMuted(dark: isDark))
-                    }
+                Button {
+                    trending = TrendingBooks.random()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundStyle(AppColor.textMuted(dark: isDark))
                 }
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(trending) { b in
+                        Button {
+                            searchText = b.title
+                            selectedCoverURL = URL(string: b.coverImageUrl)
+                            Task { await runSearch() }
+                        } label: {
+                            VStack(spacing: 6) {
+                                BookCoverImage(isbn: b.isbn, title: b.title, width: 100, height: 150)
+                                Text(b.title)
+                                    .font(.caption.weight(.medium))
+                                    .lineLimit(2)
+                                    .foregroundStyle(AppColor.text(dark: isDark))
+                                Text(b.author)
+                                    .font(.caption2)
+                                    .foregroundStyle(AppColor.textMuted(dark: isDark))
+                                    .lineLimit(1)
+                            }
+                            .frame(width: 110)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private var classicsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(hasAPIKey ? "Try one of these classics" : "Try one of these classics (works offline)")
+                    .font(.headline)
+                    .foregroundStyle(AppColor.text(dark: isDark))
+                Spacer()
+                Button {
+                    classics = ClassicBooks.random()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundStyle(AppColor.textMuted(dark: isDark))
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(classics) { b in
                         Button {
                             searchText = b.title
                             selectedCoverURL = URL(string: b.coverImageUrl)
