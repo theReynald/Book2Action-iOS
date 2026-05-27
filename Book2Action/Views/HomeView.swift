@@ -14,8 +14,21 @@ struct HomeView: View {
     @State private var selectedWorkKey: String?
     @State private var suppressNextTextChange = false
     @State private var debounceTask: Task<Void, Never>?
-    @State private var trending: [TrendingBook] = TrendingBooks.random()
+    @State private var trending: [TrendingBook] = BundledBooks.trending
     @State private var placeholderIndex: Int = 0
+    @State private var showNoKeyAlert = false
+
+    /// True when the user hasn't configured an OpenAI key. In that mode the
+    /// carousel only shows bundled books (which work offline) so every tap
+    /// produces a complete analysis instead of a "missing API key" error.
+    private var hasAPIKey: Bool {
+        !settings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The text field accepts typing only when an API key is configured.
+    /// Even after a bundled pick populates the title, the field stays
+    /// disabled — a tap then triggers the "API key required" alert.
+    private var isSearchFieldEnabled: Bool { hasAPIKey }
 
     private let placeholders = [
         "Search by title or author…",
@@ -50,7 +63,7 @@ struct HomeView: View {
                     } else if let err = bookStore.errorMessage {
                         errorCard(err)
                     } else {
-                        if settings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        if !hasAPIKey {
                             noKeyHint
                         }
                         trendingSection
@@ -59,7 +72,13 @@ struct HomeView: View {
                 .padding(20)
             }
             .refreshable {
-                trending = TrendingBooks.random()
+                trending = hasAPIKey ? TrendingBooks.random() : BundledBooks.trending
+            }
+            .onAppear {
+                trending = hasAPIKey ? TrendingBooks.random() : BundledBooks.trending
+            }
+            .onChange(of: settings.apiKey) { _, _ in
+                trending = hasAPIKey ? TrendingBooks.random() : BundledBooks.trending
             }
         }
         .navigationBarHidden(true)
@@ -134,14 +153,34 @@ struct HomeView: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(AppColor.textMuted(dark: isDark))
-                TextField(placeholders[placeholderIndex], text: $searchText)
-                    .submitLabel(.search)
-                    .onChange(of: searchText) { _, newValue in
-                        handleTextChange(newValue)
+                ZStack {
+                    TextField(
+                        hasAPIKey ? placeholders[placeholderIndex] : "Tap a book below to start",
+                        text: $searchText
+                    )
+                        .submitLabel(.search)
+                        .disabled(!isSearchFieldEnabled)
+                        .foregroundStyle(
+                            isSearchFieldEnabled
+                            ? AppColor.text(dark: isDark)
+                            : AppColor.textMuted(dark: isDark)
+                        )
+                        .onChange(of: searchText) { _, newValue in
+                            handleTextChange(newValue)
+                        }
+                        .onSubmit { Task { await runSearch() } }
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.words)
+
+                    // When the field is disabled (no API key), intercept taps
+                    // and surface the "API key required" alert instead of
+                    // silently doing nothing.
+                    if !isSearchFieldEnabled {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { showNoKeyAlert = true }
                     }
-                    .onSubmit { Task { await runSearch() } }
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.words)
+                }
 
                 if !searchText.isEmpty {
                     Button {
@@ -203,6 +242,11 @@ struct HomeView: View {
                 .fill(AppColor.cardBackground(dark: isDark))
                 .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 4)
         )
+        .alert("API key required", isPresented: $showNoKeyAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Add an OpenAI key in Settings to search any book by title. Or tap one of the bundled books below — they work without a key.")
+        }
     }
 
     @ViewBuilder
@@ -335,15 +379,17 @@ struct HomeView: View {
     private var trendingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Try one of these")
+                Text(hasAPIKey ? "Try one of these" : "Try one of these (works offline)")
                     .font(.headline)
                     .foregroundStyle(AppColor.text(dark: isDark))
                 Spacer()
-                Button {
-                    trending = TrendingBooks.random()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .foregroundStyle(AppColor.textMuted(dark: isDark))
+                if hasAPIKey {
+                    Button {
+                        trending = TrendingBooks.random()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundStyle(AppColor.textMuted(dark: isDark))
+                    }
                 }
             }
 
@@ -430,6 +476,14 @@ struct HomeView: View {
         @Bindable var bookStore = bookStore
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !bookStore.isLoading else { return }
+
+        // Defense-in-depth: if the text field was bypassed (e.g. hardware
+        // keyboard or paste) and there is no API key, only allow searches
+        // that resolve to a bundled book. Otherwise show a clear nudge.
+        if !hasAPIKey && BundledBooks.match(trimmed) == nil {
+            await MainActor.run { showNoKeyAlert = true }
+            return
+        }
 
         showSuggestions = false
         bookStore.searchTitle = trimmed

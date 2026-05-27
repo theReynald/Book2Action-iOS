@@ -88,6 +88,30 @@ What makes this book enduringly powerful is its emphasis on inside-out change, s
         return nil
     }
 
+    /// The bundled books exposed in `TrendingBook` shape, suitable for the
+    /// Home carousel when no OpenAI API key is configured. Every entry here
+    /// resolves offline through `match(_:)`, so tapping one always works.
+    static let trending: [TrendingBook] = [
+        TrendingBook(
+            title: "Atomic Habits",
+            author: "James Clear",
+            isbn: "9780735211292",
+            coverImageUrl: "https://covers.openlibrary.org/b/isbn/9780735211292-L.jpg"
+        ),
+        TrendingBook(
+            title: "Think and Grow Rich",
+            author: "Napoleon Hill",
+            isbn: "9781585424337",
+            coverImageUrl: "https://covers.openlibrary.org/b/isbn/9781585424337-L.jpg"
+        ),
+        TrendingBook(
+            title: "The 7 Habits of Highly Effective People",
+            author: "Stephen R. Covey",
+            isbn: "9781982137274",
+            coverImageUrl: "https://covers.openlibrary.org/b/isbn/9781982137274-L.jpg"
+        )
+    ]
+
     private static func detailed(_ tuples: [(String, String, String)]) -> [ActionableStep] {
         tuples.map { (day, step, chapter) in
             ActionableStep(
