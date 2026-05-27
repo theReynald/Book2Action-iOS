@@ -9,6 +9,11 @@ struct SettingsView: View {
     @State private var savedMessageIsError: Bool = false
     @State private var savedMessageIsSuccess: Bool = false
     @State private var isValidating: Bool = false
+    @State private var showTutorial: Bool = false
+
+    /// YouTube video ID for the in-app tutorial. Replace to update without
+    /// shipping a new build (just upload a new YouTube video and swap the ID).
+    private let tutorialVideoID = "TF5QFW-BcKM"
 
     var body: some View {
         @Bindable var settings = settings
@@ -86,6 +91,18 @@ struct SettingsView: View {
                 Text("Stored securely in the iOS Keychain on this device. Get a key at platform.openai.com. Without one, only the three pre-loaded books (Atomic Habits, Think and Grow Rich, 7 Habits) will work.")
             }
 
+            Section {
+                Button {
+                    showTutorial = true
+                } label: {
+                    Label("Watch tutorial", systemImage: "play.rectangle.fill")
+                }
+            } header: {
+                Text("Help")
+            } footer: {
+                Text("A short walkthrough showing how to set up your API key and use the app.")
+            }
+
             Section("About") {
                 LabeledContent("Version", value: appVersion)
                 Link(destination: URL(string: "https://github.com/theReynald/Book2Action")!) {
@@ -97,6 +114,9 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             apiKeyDraft = settings.apiKey
+        }
+        .sheet(isPresented: $showTutorial) {
+            YouTubePlayerSheet(videoID: tutorialVideoID, title: "Tutorial")
         }
     }
 
