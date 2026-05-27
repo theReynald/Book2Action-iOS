@@ -18,6 +18,12 @@ final class SpeechManager: NSObject, AVSpeechSynthesizerDelegate {
 
     var isSpeaking: Bool = false
     var isPaused: Bool = false
+    /// The text currently being spoken (nil when idle). Consumers use this
+    /// to scope per-text UI like sentence highlighting and Play/Pause buttons.
+    var currentText: String? = nil
+    /// UTF-16 range within `currentText` of the word currently being spoken.
+    /// Updated by the synthesizer delegate as playback progresses.
+    var currentRange: NSRange? = nil
     /// Selected voice identifier (persisted)
     var voiceId: String? {
         didSet { UserDefaults.standard.set(voiceId, forKey: "book2action_voice_id") }
@@ -109,6 +115,9 @@ final class SpeechManager: NSObject, AVSpeechSynthesizerDelegate {
         guard !trimmed.isEmpty else { return }
         if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
 
+        currentText = trimmed
+        currentRange = nil
+
         let utterance = AVSpeechUtterance(string: trimmed)
         if let voiceId, let v = AVSpeechSynthesisVoice(identifier: voiceId) {
             utterance.voice = v
@@ -140,6 +149,9 @@ final class SpeechManager: NSObject, AVSpeechSynthesizerDelegate {
         isSpeaking = true
         isPaused = false
     }
+    func speechSynthesizer(_ s: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
+        currentRange = characterRange
+    }
     func speechSynthesizer(_ s: AVSpeechSynthesizer, didPause u: AVSpeechUtterance) {
         isPaused = true
     }
@@ -149,9 +161,13 @@ final class SpeechManager: NSObject, AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
         isSpeaking = false
         isPaused = false
+        currentText = nil
+        currentRange = nil
     }
     func speechSynthesizer(_ s: AVSpeechSynthesizer, didCancel u: AVSpeechUtterance) {
         isSpeaking = false
         isPaused = false
+        currentText = nil
+        currentRange = nil
     }
 }

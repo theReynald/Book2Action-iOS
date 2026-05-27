@@ -37,6 +37,9 @@ struct RootView: View {
                     }
                 }
         }
+        .overlay(alignment: .bottom) {
+            SpeechMiniPlayer()
+        }
     }
 }
 

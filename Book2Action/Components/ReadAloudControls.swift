@@ -5,21 +5,26 @@ struct ReadAloudControls: View {
     @State private var speech = SpeechManager.shared
     @State private var showingVoicePicker = false
 
+    /// True only when this control's `text` is the one currently being spoken.
+    /// Lets multiple ReadAloudControls coexist (e.g. summary + action plan).
+    private var isMine: Bool { speech.isSpeaking && speech.currentText == text }
+    private var isMinePaused: Bool { isMine && speech.isPaused }
+
     var body: some View {
         HStack(spacing: 12) {
             Button {
-                if speech.isSpeaking {
+                if isMine {
                     if speech.isPaused { speech.resume() } else { speech.pause() }
                 } else {
                     speech.speak(text)
                 }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: speech.isSpeaking
-                        ? (speech.isPaused ? "play.fill" : "pause.fill")
+                    Image(systemName: isMine
+                        ? (isMinePaused ? "play.fill" : "pause.fill")
                         : "speaker.wave.2.fill")
-                    Text(speech.isSpeaking
-                        ? (speech.isPaused ? "Resume" : "Pause")
+                    Text(isMine
+                        ? (isMinePaused ? "Resume" : "Pause")
                         : "Read Aloud")
                         .lineLimit(1)
                 }
@@ -33,7 +38,7 @@ struct ReadAloudControls: View {
             }
             .layoutPriority(1)
 
-            if speech.isSpeaking {
+            if isMine {
                 Button {
                     speech.stop()
                 } label: {
