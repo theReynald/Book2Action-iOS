@@ -136,10 +136,8 @@ struct BookResultView: View {
                 Spacer()
                 ReadAloudControls(text: book.summary)
             }
-            Text(book.summary)
-                .font(.body)
+            HighlightedSummaryText(text: book.summary)
                 .foregroundStyle(AppColor.text(dark: isDark))
-                .lineSpacing(4)
         }
         .padding(14)
         .background(AppColor.cardBackground(dark: isDark), in: RoundedRectangle(cornerRadius: 16))
@@ -147,6 +145,7 @@ struct BookResultView: View {
 
     private func actionsCard(_ book: Book) -> some View {
         @Bindable var bookStore = bookStore
+        let script = Self.actionPlanReadAloudScript(book)
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label("7-Day Action Plan", systemImage: "lightbulb.fill").font(.headline)
@@ -156,12 +155,32 @@ struct BookResultView: View {
                 } label: {
                     Label("PDF", systemImage: "square.and.arrow.up").font(.caption.bold())
                 }
+                Button {
+                    let speech = SpeechManager.shared
+                    if speech.isSpeaking && speech.currentText == script.text {
+                        speech.stop()
+                    } else {
+                        speech.speak(script.text)
+                    }
+                } label: {
+                    Label(
+                        SpeechManager.shared.currentText == script.text && SpeechManager.shared.isSpeaking ? "Stop" : "Read Aloud",
+                        systemImage: SpeechManager.shared.currentText == script.text && SpeechManager.shared.isSpeaking ? "stop.fill" : "speaker.wave.2.fill"
+                    )
+                    .font(.caption.bold())
+                }
+                .accessibilityLabel("Read 7-day action plan aloud")
             }
             ForEach(Array(book.actionableSteps.enumerated()), id: \.offset) { (i, step) in
                 Button {
                     bookStore.path.append(.actionDetail(i))
                 } label: {
-                    actionRow(index: i, step: step, book: book)
+                    actionRow(
+                        index: i,
+                        step: step,
+                        book: book,
+                        isReading: Self.isReading(stepIndex: i, script: script)
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -170,7 +189,40 @@ struct BookResultView: View {
         .background(AppColor.cardBackground(dark: isDark), in: RoundedRectangle(cornerRadius: 16))
     }
 
-    private func actionRow(index: Int, step: ActionableStep, book: Book) -> some View {
+    /// Spoken script for the 7-day action plan, with per-step character ranges
+    /// so we can highlight the row currently being read.
+    private struct ActionPlanScript: Equatable {
+        let text: String
+        let stepRanges: [NSRange]
+    }
+
+    private static func actionPlanReadAloudScript(_ book: Book) -> ActionPlanScript {
+        var output = "Seven day action plan for \(book.title)."
+        var ranges: [NSRange] = []
+        for (i, step) in book.actionableSteps.enumerated() {
+            output += " "
+            let start = (output as NSString).length
+            let label = step.day ?? "Day \(i + 1)"
+            var line = "\(label). \(step.step)"
+            if !line.hasSuffix(".") { line += "." }
+            let chapter = step.chapter.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !chapter.isEmpty { line += " From \(chapter)." }
+            output += line
+            let end = (output as NSString).length
+            ranges.append(NSRange(location: start, length: end - start))
+        }
+        return ActionPlanScript(text: output, stepRanges: ranges)
+    }
+
+    private static func isReading(stepIndex: Int, script: ActionPlanScript) -> Bool {
+        let speech = SpeechManager.shared
+        guard speech.currentText == script.text,
+              let r = speech.currentRange,
+              stepIndex < script.stepRanges.count else { return false }
+        return NSLocationInRange(r.location, script.stepRanges[stepIndex])
+    }
+
+    private func actionRow(index: Int, step: ActionableStep, book: Book, isReading: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 12) {
             ZStack {
                 Circle().fill(AppColor.primary)
@@ -199,7 +251,16 @@ struct BookResultView: View {
             Spacer()
         }
         .padding(10)
+        .background(
+            (isReading ? Color.yellow.opacity(0.35) : Color.clear),
+            in: RoundedRectangle(cornerRadius: 10)
+        )
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(isReading ? Color.yellow.opacity(0.9) : .clear, lineWidth: 2)
+        )
+        .animation(.easeInOut(duration: 0.2), value: isReading)
     }
 
     // MARK: - Actions
