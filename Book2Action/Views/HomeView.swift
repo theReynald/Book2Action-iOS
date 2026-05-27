@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct HomeView: View {
     @Environment(ThemeStore.self) private var theme
@@ -64,7 +65,10 @@ struct HomeView: View {
     var body: some View {
         @Bindable var bookStore = bookStore
         ZStack {
-            AppColor.background(dark: isDark).ignoresSafeArea()
+            AppColor.background(dark: isDark)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { hideKeyboard() }
 
             ScrollView {
                 VStack(spacing: 24) {
@@ -85,7 +89,11 @@ struct HomeView: View {
                     }
                 }
                 .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .contentShape(Rectangle())
+                .simultaneousGesture(TapGesture().onEnded { hideKeyboard() })
             }
+            .scrollDismissesKeyboard(.immediately)
             .refreshable {
                 trending = hasAPIKey ? TrendingBooks.random() : BundledBooks.trending
             }
@@ -601,6 +609,13 @@ struct HomeView: View {
                 bookStore.errorMessage = result.error ?? "Failed to find book"
             }
         }
+    }
+
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil, from: nil, for: nil
+        )
     }
 
     /// Local copy of `OpenAIService.splitTitleAndAuthor` so we can derive the

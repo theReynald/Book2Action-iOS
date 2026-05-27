@@ -47,17 +47,19 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                 }
 
-                Button {
-                    Task { await validateAndSave() }
-                } label: {
-                    HStack {
-                        if isValidating {
-                            ProgressView()
+                if !settings.hasApiKey {
+                    Button {
+                        Task { await validateAndSave() }
+                    } label: {
+                        HStack {
+                            if isValidating {
+                                ProgressView()
+                            }
+                            Text(isValidating ? "Validating…" : "Save API Key")
                         }
-                        Text(isValidating ? "Validating…" : "Save API Key")
                     }
+                    .disabled(isValidating || apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .disabled(isValidating || apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 if settings.hasApiKey {
                     Button("Remove API Key", role: .destructive) {
