@@ -50,6 +50,9 @@ struct HomeView: View {
                     } else if let err = bookStore.errorMessage {
                         errorCard(err)
                     } else {
+                        if settings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            noKeyHint
+                        }
                         trendingSection
                     }
                 }
@@ -302,6 +305,32 @@ struct HomeView: View {
     }
 
     // MARK: - Trending
+
+    /// Shown when no OpenAI API key is configured. Lets first-time users (and
+    /// App Review) know they can try the app without supplying anything: the
+    /// bundled books work fully offline.
+    private var noKeyHint: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "sparkles")
+                .font(.title3)
+                .foregroundStyle(AppColor.primary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("No account or API key needed to try the app")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppColor.text(dark: isDark))
+                Text("Tap any book below to see a full summary and 7-day action plan. Add your own OpenAI key in Settings later to analyze any other book.")
+                    .font(.caption)
+                    .foregroundStyle(AppColor.textMuted(dark: isDark))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(AppColor.primary.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(AppColor.primary.opacity(0.25), lineWidth: 1)
+        )
+    }
 
     private var trendingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
