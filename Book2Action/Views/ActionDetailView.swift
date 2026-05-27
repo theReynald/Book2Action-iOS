@@ -63,7 +63,7 @@ struct ActionDetailView: View {
                     ReadAloudControls(text: fullText)
 
                     section(title: "Key Takeaway") {
-                        Text(details.keyTakeaway)
+                        HighlightedSummaryText(text: details.keyTakeaway, spokenText: fullText)
                             .foregroundStyle(AppColor.text(dark: isDark))
                     }
 
@@ -74,7 +74,7 @@ struct ActionDetailView: View {
                                     Text("\(i + 1).")
                                         .font(.caption.bold())
                                         .foregroundStyle(AppColor.primary)
-                                    Text(s)
+                                    HighlightedSummaryText(text: s, spokenText: fullText)
                                         .foregroundStyle(AppColor.text(dark: isDark))
                                 }
                             }
