@@ -86,10 +86,11 @@ struct HomeView: View {
                         if !recentBooks.isEmpty {
                             recentlyViewedSection
                         }
-                        if hasAPIKey {
-                            trendingSection
-                        }
+                        // Trending row is hidden until a live data source
+                        // (e.g. NYT Bestsellers API) is wired in. Re-enable by
+                        // adding `if hasAPIKey { trendingSection }` here.
                         classicsSection
+                        buildStampView
                     }
                 }
                 .padding(20)
@@ -99,15 +100,10 @@ struct HomeView: View {
             }
             .scrollDismissesKeyboard(.immediately)
             .refreshable {
-                if hasAPIKey { trending = TrendingBooks.random() }
                 classics = ClassicBooks.random()
             }
             .onAppear {
-                if hasAPIKey, trending.isEmpty { trending = TrendingBooks.random() }
                 if classics.isEmpty { classics = ClassicBooks.random() }
-            }
-            .onChange(of: settings.apiKey) { _, _ in
-                trending = hasAPIKey ? TrendingBooks.random() : []
             }
         }
         .navigationBarHidden(true)
@@ -509,7 +505,7 @@ struct HomeView: View {
     private var classicsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(hasAPIKey ? "Try one of these classics" : "Try one of these classics (works offline)")
+                Text("Try one of these classics")
                     .font(.headline)
                     .foregroundStyle(AppColor.text(dark: isDark))
                 Spacer()
@@ -548,6 +544,28 @@ struct HomeView: View {
                 .padding(.vertical, 4)
             }
         }
+    }
+
+    private var buildStampView: some View {
+        let info = Bundle.main.infoDictionary
+        let version = (info?["CFBundleShortVersionString"] as? String) ?? "?"
+        let build = (info?["CFBundleVersion"] as? String) ?? "?"
+        let stamp: String = {
+            if let exe = Bundle.main.executableURL,
+               let attrs = try? FileManager.default.attributesOfItem(atPath: exe.path),
+               let date = attrs[.modificationDate] as? Date {
+                let df = DateFormatter()
+                df.dateFormat = "yyyy-MM-dd HH:mm"
+                return df.string(from: date)
+            }
+            return "unknown"
+        }()
+        return Text("v\(version) (\(build)) · built \(stamp)")
+            .font(.caption2)
+            .foregroundStyle(AppColor.textMuted(dark: isDark))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, 16)
+            .padding(.bottom, 4)
     }
 
     // MARK: - Actions
