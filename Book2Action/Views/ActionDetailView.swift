@@ -120,11 +120,15 @@ struct ActionDetailView: View {
     }
 
     private func addToCalendar(step: ActionableStep, book: Book, details: DetailedStepInfo) async {
-        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-        var start = tomorrow
-        if let nineAM = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) {
-            start = nineAM
-        }
+        // Honor the step's day-of-week (e.g. "Wednesday") so the event lands
+        // on the right day rather than always "tomorrow at 9am".
+        let start: Date = {
+            if let day = step.day {
+                return CalendarHelper.nextOccurrence(of: day)
+            }
+            let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+            return Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+        }()
         let notes = """
         From book: \(book.title)
         Chapter: \(step.chapter)
@@ -135,12 +139,12 @@ struct ActionDetailView: View {
         \(details.sentences.joined(separator: "\n"))
         """
         do {
-            _ = try await CalendarHelper.addEvent(
+            let result = try await CalendarHelper.addEvent(
                 title: "Book Action: \(step.step)",
                 notes: notes,
                 start: start
             )
-            await showToast("Added to Calendar")
+            await showToast(CalendarHelper.toastMessage(for: result))
         } catch {
             await showToast("Couldn't add to Calendar")
         }
