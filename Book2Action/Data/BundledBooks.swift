@@ -85,7 +85,9 @@ What makes this book enduringly powerful is its emphasis on inside-out change, s
         for (k, v) in all where k.contains(key) || key.contains(k) {
             return v
         }
-        return nil
+        // Fall through to the bundled classics so the Home "Try one of these
+        // classics" row works without an OpenAI API key.
+        return BundledClassics.match(title)
     }
 
     /// The bundled books exposed in `TrendingBook` shape, suitable for the
