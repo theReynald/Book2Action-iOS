@@ -7,10 +7,19 @@ struct BookResultView: View {
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.openURL) private var openURL
 
-    @State private var shareItems: [Any] = []
-    @State private var showShareSheet = false
+    @State private var sharePayload: SharePayload?
     @State private var toastMessage: String?
     @State private var isPreparingShare = false
+
+    /// Identifiable wrapper so SwiftUI's `.sheet(item:)` always rebuilds the
+    /// ShareSheet with the latest items. Using `.sheet(isPresented:)` with
+    /// a separate items array can present an empty sheet on the first tap
+    /// when the state change and the bool toggle land in the same render
+    /// pass.
+    private struct SharePayload: Identifiable {
+        let id = UUID()
+        let items: [Any]
+    }
 
     private var isDark: Bool {
         switch theme.mode {
@@ -81,8 +90,8 @@ struct BookResultView: View {
                 }
             }
         }
-        .sheet(isPresented: $showShareSheet) {
-            ShareSheet(items: shareItems)
+        .sheet(item: $sharePayload) { payload in
+            ShareSheet(items: payload.items)
         }
     }
 
@@ -297,8 +306,7 @@ struct BookResultView: View {
     private func exportPDF(_ book: Book) {
         do {
             let url = try PDFExporter.export(book)
-            shareItems = [url]
-            showShareSheet = true
+            sharePayload = SharePayload(items: [url])
         } catch {
             Task { await showToast("PDF export failed") }
         }
@@ -325,8 +333,7 @@ struct BookResultView: View {
         if let amazon = AmazonLinks.searchURL(title: book.title, author: book.author, isbn: book.isbn) {
             items.append(amazon)
         }
-        shareItems = items
-        showShareSheet = true
+        sharePayload = SharePayload(items: items)
     }
 
     private func loadImage(from url: URL) async -> UIImage? {
