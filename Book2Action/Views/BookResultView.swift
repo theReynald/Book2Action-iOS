@@ -268,10 +268,24 @@ struct BookResultView: View {
     private func addToCalendar(step: ActionableStep, book: Book) async {
         guard let day = step.day else { return }
         let start = CalendarHelper.nextOccurrence(of: day)
+        // Mirror ActionDetailView so the event has the same "Book Action:"
+        // title prefix and a full notes body (chapter + key takeaway +
+        // detail sentences) regardless of where it was added from.
+        var notesLines: [String] = [
+            "From book: \(book.title)",
+            "Chapter: \(step.chapter)"
+        ]
+        if let details = step.details {
+            notesLines.append("")
+            notesLines.append("Key takeaway: \(details.keyTakeaway)")
+            notesLines.append("")
+            notesLines.append("Details:")
+            notesLines.append(details.sentences.joined(separator: "\n"))
+        }
         do {
             let result = try await CalendarHelper.addEvent(
-                title: step.step,
-                notes: "Action step from \"\(book.title)\"",
+                title: "Book Action: \(step.step)",
+                notes: notesLines.joined(separator: "\n"),
                 start: start
             )
             await showToast(CalendarHelper.toastMessage(for: result))
