@@ -153,7 +153,7 @@ struct ActionDetailView: View {
     @MainActor
     private func showToast(_ message: String) async {
         withAnimation { toastMessage = message }
-        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
         withAnimation { toastMessage = nil }
     }
 }
