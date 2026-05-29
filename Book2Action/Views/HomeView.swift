@@ -90,7 +90,6 @@ struct HomeView: View {
                         // (e.g. NYT Bestsellers API) is wired in. Re-enable by
                         // adding `if hasAPIKey { trendingSection }` here.
                         classicsSection
-                        buildStampView
                     }
                 }
                 .padding(20)
@@ -153,6 +152,8 @@ struct HomeView: View {
             Text("Transform Books into Actionable Insights")
                 .font(.subheadline)
                 .foregroundStyle(AppColor.textMuted(dark: isDark))
+
+            buildStampView
 
             HStack(spacing: 16) {
                 featureBadge(icon: "magnifyingglass", label: "Search Books")
@@ -563,9 +564,6 @@ struct HomeView: View {
         return Text("v\(version) (\(build)) · built \(stamp)")
             .font(.caption2)
             .foregroundStyle(AppColor.textMuted(dark: isDark))
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.top, 16)
-            .padding(.bottom, 4)
     }
 
     // MARK: - Actions
