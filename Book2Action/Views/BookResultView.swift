@@ -269,12 +269,12 @@ struct BookResultView: View {
         guard let day = step.day else { return }
         let start = CalendarHelper.nextOccurrence(of: day)
         do {
-            _ = try await CalendarHelper.addEvent(
+            let result = try await CalendarHelper.addEvent(
                 title: step.step,
                 notes: "Action step from \"\(book.title)\"",
                 start: start
             )
-            await showToast("Added to Calendar")
+            await showToast(CalendarHelper.toastMessage(for: result))
         } catch {
             await showToast("Couldn't add to Calendar")
         }
