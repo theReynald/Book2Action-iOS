@@ -10,6 +10,7 @@ struct BookResultView: View {
     @State private var sharePayload: SharePayload?
     @State private var toastMessage: String?
     @State private var isPreparingShare = false
+    @State private var pdfChooserBook: Book?
 
     /// Identifiable wrapper so SwiftUI's `.sheet(item:)` always rebuilds the
     /// ShareSheet with the latest items. Using `.sheet(isPresented:)` with
@@ -81,7 +82,7 @@ struct BookResultView: View {
                         Label("Post to X", systemImage: "text.bubble")
                     }
                     Button {
-                        exportPDF(book)
+                        pdfChooserBook = book
                     } label: {
                         Label("Export PDF", systemImage: "doc.richtext")
                     }
@@ -92,6 +93,27 @@ struct BookResultView: View {
         }
         .sheet(item: $sharePayload) { payload in
             ShareSheet(items: payload.items)
+        }
+        .confirmationDialog(
+            "Export PDF",
+            isPresented: Binding(
+                get: { pdfChooserBook != nil },
+                set: { if !$0 { pdfChooserBook = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pdfChooserBook
+        ) { book in
+            Button("Short plan") {
+                pdfChooserBook = nil
+                exportPDF(book, detailed: false)
+            }
+            Button("Detailed plan") {
+                pdfChooserBook = nil
+                exportPDF(book, detailed: true)
+            }
+            Button("Cancel", role: .cancel) { pdfChooserBook = nil }
+        } message: { _ in
+            Text("Short plan: one-page summary and steps.\nDetailed plan: includes key takeaway and detailed implementation for each day.")
         }
     }
 
@@ -160,7 +182,7 @@ struct BookResultView: View {
                 Label("7-Day Action Plan", systemImage: "lightbulb.fill").font(.headline)
                 Spacer()
                 Button {
-                    exportPDF(book)
+                    pdfChooserBook = book
                 } label: {
                     Label("PDF", systemImage: "square.and.arrow.up").font(.caption.bold())
                 }
@@ -303,9 +325,9 @@ struct BookResultView: View {
         }
     }
 
-    private func exportPDF(_ book: Book) {
+    private func exportPDF(_ book: Book, detailed: Bool) {
         do {
-            let url = try PDFExporter.export(book)
+            let url = try PDFExporter.export(book, detailed: detailed)
             sharePayload = SharePayload(items: [url])
         } catch {
             Task { await showToast("PDF export failed") }
