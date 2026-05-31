@@ -95,6 +95,9 @@ struct SettingsView: View {
                 Text("Stored securely in the iOS Keychain on this device. Get a key at platform.openai.com. Without one, only the three pre-loaded books (Atomic Habits, Think and Grow Rich, 7 Habits) will work.")
             }
 
+            // Help section hidden until the final tutorial video is ready.
+            // To re-enable, uncomment the block below.
+            /*
             Section {
                 Button {
                     showTutorial = true
@@ -106,6 +109,7 @@ struct SettingsView: View {
             } footer: {
                 Text("A short walkthrough showing how to set up your API key and use the app.")
             }
+            */
 
             Section {
                 Button(role: .destructive) {
